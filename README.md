@@ -19,17 +19,13 @@ It is built for:
 - `ffmpeg` for Reddit videos with audio
 - Internet access to Reddit and any external media host
 
-On this machine, the recommended interpreter is Homebrew Python 3.13:
-
-```bash
-/opt/homebrew/bin/python3.13 --version
-```
-
 ## Setup
 
-Create a virtual environment and install the CLI:
+Clone the repository, create a virtual environment, and install the CLI:
 
 ```bash
+git clone https://github.com/andrew-ladd/snooper.git
+cd snooper
 scripts/install.sh --link
 ```
 
@@ -49,10 +45,10 @@ file:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-To choose a specific interpreter or virtualenv path:
+To choose a specific Python interpreter or virtualenv path:
 
 ```bash
-scripts/install.sh --link --python /opt/homebrew/bin/python3.13 --venv .venv
+scripts/install.sh --link --python /path/to/python3 --venv .venv
 ```
 
 For a runtime-only install without test dependencies:
@@ -71,18 +67,18 @@ An alias also works for interactive shell use:
 
 ```bash
 scripts/install.sh --alias
-source ~/.zshrc
 ```
 
 The alias option writes a managed block like
 `alias snooper='/path/to/.venv/bin/snooper'` to `~/.zshrc` for zsh, `~/.bashrc`
 for bash, or `~/.profile` otherwise. Use `--alias-file PATH` to choose a
-different startup file.
+different startup file. After installing an alias, restart your shell or source
+the startup file printed by the script.
 
 Manual setup is equivalent to:
 
 ```bash
-/opt/homebrew/bin/python3.13 -m venv .venv
+python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/python -m pip install --no-build-isolation -e '.[test]'
 ```
