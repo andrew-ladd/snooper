@@ -1,6 +1,6 @@
 # snooper
 
-![Reddit Snoo mascot](https://www.absolutegeeks.com/wp-content/uploads/2023/11/Screenshot-2023-11-30-at-12.41.26%E2%80%AFPM.png)
+<img src="https://www.absolutegeeks.com/wp-content/uploads/2023/11/Screenshot-2023-11-30-at-12.41.26%E2%80%AFPM.png" alt="Reddit Snoo mascot" width="180">
 
 `snooper` downloads media associated with Reddit posts from the command line.
 Give it a Reddit post URL and it will save the post's images, galleries, videos,
