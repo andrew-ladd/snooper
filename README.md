@@ -115,6 +115,23 @@ it automatically before continuing. To install it yourself:
 .venv/bin/python -m pip install 'yt-dlp>=2025.1.0'
 ```
 
+## Uninstall
+
+Remove the virtual environment, the default `~/.local/bin/snooper` symlink if it
+points at that environment, and the managed shell alias block if present:
+
+```bash
+scripts/uninstall.sh
+```
+
+If you installed with a custom path, pass the same location:
+
+```bash
+scripts/uninstall.sh --venv /path/to/.venv --bin-dir "$HOME/bin"
+```
+
+Downloaded media is not removed.
+
 ## Usage
 
 Download a Reddit video post:
