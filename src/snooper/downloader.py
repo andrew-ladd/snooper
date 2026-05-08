@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import importlib
 import json
 import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.request
 from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urljoin
 
 from . import ffmpeg
 from .filenames import media_filename, post_directory, unique_path
@@ -33,18 +38,16 @@ def download_post(
     if not post.media_items:
         return []
 
-    if any(item.kind in {MediaKind.VIDEO, MediaKind.EXTERNAL} for item in post.media_items):
-        _ensure_yt_dlp()
+    if any(item.kind == MediaKind.VIDEO for item in post.media_items):
         if not dry_run and install_ffmpeg:
             attempt = ffmpeg.install_ffmpeg_if_possible(dry_run=dry_run)
-            if not attempt.success and any(item.kind == MediaKind.VIDEO for item in post.media_items):
+            if not attempt.success:
                 raise DownloadError(attempt.message)
-        elif (
-            not dry_run
-            and not ffmpeg.ffmpeg_available()
-            and any(item.kind == MediaKind.VIDEO for item in post.media_items)
-        ):
+        elif not dry_run and not ffmpeg.ffmpeg_available():
             raise DownloadError("ffmpeg is required for video downloads; install ffmpeg or omit --no-install-ffmpeg")
+
+    if any(item.kind == MediaKind.EXTERNAL for item in post.media_items):
+        _ensure_yt_dlp()
 
     target_dir = post_directory(output_dir, post.subreddit, post.id, post.title)
     if not dry_run:
@@ -55,6 +58,10 @@ def download_post(
         if item.kind in {MediaKind.IMAGE, MediaKind.GALLERY_IMAGE}:
             downloaded.append(
                 _download_direct(item, post, target_dir, index, overwrite=overwrite, dry_run=dry_run)
+            )
+        elif item.kind == MediaKind.VIDEO and item.source == "reddit_video":
+            downloaded.append(
+                _download_reddit_video(item, post, target_dir, index, overwrite=overwrite, dry_run=dry_run)
             )
         else:
             downloaded.extend(
@@ -141,6 +148,104 @@ def _download_with_yt_dlp(
     return [requested]
 
 
+def _download_reddit_video(
+    item: MediaItem,
+    post: RedditPost,
+    target_dir: Path,
+    index: int,
+    *,
+    overwrite: bool,
+    dry_run: bool,
+) -> Path:
+    filename = media_filename(post.title, index, item.url, default_ext=".mp4")
+    destination = unique_path(target_dir / filename, overwrite=overwrite)
+    if dry_run:
+        return destination
+    if destination.exists() and not overwrite:
+        return destination
+
+    video_url, audio_url = _reddit_video_streams(item.url)
+    command = [
+        "ffmpeg",
+        "-y" if overwrite else "-n",
+        "-loglevel",
+        "error",
+        "-i",
+        video_url,
+    ]
+    if audio_url:
+        command.extend(["-i", audio_url])
+    command.extend(["-c", "copy", str(destination)])
+
+    try:
+        subprocess.run(command, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise DownloadError(f"failed to download Reddit video with ffmpeg: {exc}") from exc
+
+    return destination
+
+
+def _reddit_video_streams(fallback_url: str) -> tuple[str, str | None]:
+    playlist_url = _reddit_video_playlist_url(fallback_url)
+    try:
+        request = urllib.request.Request(playlist_url, headers={"User-Agent": "snooper/0.1"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            manifest = response.read()
+    except urllib.error.URLError:
+        return fallback_url, None
+
+    try:
+        root = ET.fromstring(manifest)
+    except ET.ParseError:
+        return fallback_url, None
+
+    video_url: str | None = None
+    video_score = -1
+    audio_url: str | None = None
+    audio_score = -1
+
+    for adaptation in root.findall(".//{*}AdaptationSet"):
+        mime_type = str(adaptation.get("mimeType") or adaptation.get("contentType") or "").lower()
+        for representation in adaptation.findall("{*}Representation"):
+            stream_url = _representation_base_url(playlist_url, representation)
+            if not stream_url:
+                continue
+            score = _representation_score(representation)
+            representation_mime = str(representation.get("mimeType") or mime_type).lower()
+            if "audio" in representation_mime or "audio" in mime_type:
+                if score > audio_score:
+                    audio_url = stream_url
+                    audio_score = score
+            elif "video" in representation_mime or "video" in mime_type:
+                if score > video_score:
+                    video_url = stream_url
+                    video_score = score
+
+    return video_url or fallback_url, audio_url
+
+
+def _reddit_video_playlist_url(fallback_url: str) -> str:
+    path = fallback_url.split("?", 1)[0]
+    if "/" not in path:
+        return fallback_url
+    return f"{path.rsplit('/', 1)[0]}/DASHPlaylist.mpd"
+
+
+def _representation_base_url(playlist_url: str, representation: ET.Element) -> str | None:
+    base_url = representation.findtext("{*}BaseURL")
+    if not base_url:
+        return None
+    return urljoin(playlist_url, base_url)
+
+
+def _representation_score(representation: ET.Element) -> int:
+    for key in ("height", "bandwidth"):
+        value = representation.get(key)
+        if value and value.isdigit():
+            return int(value)
+    return 0
+
+
 def _directory_snapshot(directory: Path) -> set[Path]:
     if not directory.exists():
         return set()
@@ -149,9 +254,24 @@ def _directory_snapshot(directory: Path) -> set[Path]:
 
 def _ensure_yt_dlp() -> None:
     try:
-        import yt_dlp  # noqa: F401
-    except ImportError as exc:
-        raise DownloadError("yt-dlp is required; install snooper with `python3 -m pip install -e .`") from exc
+        importlib.import_module("yt_dlp")
+    except ImportError:
+        _install_yt_dlp()
+        try:
+            importlib.import_module("yt_dlp")
+        except ImportError as exc:
+            raise DownloadError("yt-dlp was installed but could not be imported") from exc
+
+
+def _install_yt_dlp() -> None:
+    command = [sys.executable, "-m", "pip", "install", "yt-dlp>=2025.1.0"]
+    try:
+        subprocess.run(command, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise DownloadError(
+            "yt-dlp is required for external media links, but automatic installation failed. "
+            f"Install it manually with `{' '.join(command)}`."
+        ) from exc
 
 
 def _metadata_json(post: RedditPost) -> str:

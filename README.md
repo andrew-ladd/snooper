@@ -10,9 +10,9 @@ It is built for:
 
 - Reddit-hosted images: `jpg`, `jpeg`, `png`, `webp`, and `gif`
 - Reddit galleries, preserving gallery order and captions in metadata
-- Reddit-hosted videos, using `yt-dlp` and `ffmpeg` to merge audio/video
-- External media links supported by `yt-dlp`, such as many common video and
-  image-hosting sites
+- Reddit-hosted videos, using `ffmpeg` to merge audio/video
+- External media links supported by optional `yt-dlp`, such as many common
+  video and image-hosting sites
 - `reddit.com`, `old.reddit.com`, mobile Reddit URLs, and `redd.it` short links
 
 ## Requirements
@@ -31,9 +31,12 @@ cd snooper
 scripts/install.sh --link
 ```
 
-The script finds Python 3.10 or newer, creates `.venv`, installs the package in
-editable mode with test dependencies, and checks that the `snooper` command is
-available. With `--link`, it also symlinks the command into `~/.local/bin` so
+The script finds Python 3.10 or newer, creates `.venv`, installs a lean launcher
+that runs the local source tree, and checks that the `snooper` command is
+available. This default install does not install `yt-dlp`; Reddit-hosted images,
+galleries, and videos work without it. If you later download an external media
+link that needs `yt-dlp`, snooper installs it automatically in the active
+environment. With `--link`, it also symlinks the command into `~/.local/bin` so
 you can run:
 
 ```bash
@@ -53,10 +56,16 @@ To choose a specific Python interpreter or virtualenv path:
 scripts/install.sh --link --python /path/to/python3 --venv .venv
 ```
 
-For a runtime-only install without test dependencies:
+To preinstall external media site support through `yt-dlp`:
 
 ```bash
-scripts/install.sh --link --no-dev
+scripts/install.sh --link --with-external
+```
+
+For development dependencies:
+
+```bash
+scripts/install.sh --link --dev
 ```
 
 To choose a different directory for the `snooper` command:
@@ -81,8 +90,12 @@ Manual setup is equivalent to:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip setuptools wheel
-.venv/bin/python -m pip install --no-build-isolation -e '.[test]'
+cat > .venv/bin/snooper <<'SH'
+#!/usr/bin/env bash
+export PYTHONPATH="$(pwd)/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$(pwd)/.venv/bin/python" -m snooper.cli "$@"
+SH
+chmod +x .venv/bin/snooper
 ```
 
 Run the tool through the virtualenv:
@@ -94,6 +107,13 @@ Run the tool through the virtualenv:
 If `ffmpeg` is missing, `snooper` will try to install it with a known package
 manager: `brew`, `apt-get`, `dnf`, `yum`, `pacman`, or `choco`. Disable that
 behavior with `--no-install-ffmpeg`.
+
+External media links use optional `yt-dlp`. If it is missing, snooper installs
+it automatically before continuing. To install it yourself:
+
+```bash
+.venv/bin/python -m pip install 'yt-dlp>=2025.1.0'
+```
 
 ## Usage
 
@@ -179,5 +199,5 @@ Run a live dry-run against the example post:
 snooper --dry-run --no-install-ffmpeg https://www.reddit.com/r/nhl/comments/1t43i14/leo_carlsson_with_a_stunning_move_to_set_up/
 ```
 
-The project intentionally keeps direct Reddit parsing small and delegates broad
-site support to `yt-dlp`.
+The project intentionally keeps direct Reddit parsing small. Broad external
+site support is delegated to lazily installed `yt-dlp`.

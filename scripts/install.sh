@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/install.sh [options]
 
-Create a virtual environment and install snooper.
+Create a virtual environment and install a snooper launcher.
 
 Options:
   --python PATH       Python interpreter to use. Defaults to the first Python
@@ -20,7 +20,8 @@ Options:
   --alias-file PATH  Shell startup file to update when --alias is used.
                       Defaults to ~/.zshrc for zsh, ~/.bashrc for bash, or
                       ~/.profile otherwise.
-  --no-dev           Install runtime dependencies only, without test extras.
+  --with-external    Preinstall yt-dlp support for external media sites.
+  --dev              Install external media and test dependencies.
   -h, --help         Show this help.
 
 Environment:
@@ -47,7 +48,8 @@ bin_dir="${SNOOPER_BIN_DIR:-"$HOME/.local/bin"}"
 alias_file="${SNOOPER_ALIAS_FILE:-}"
 install_link=0
 install_alias=0
-install_target='.[test]'
+install_label='runtime'
+install_deps=()
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -84,8 +86,14 @@ while [ "$#" -gt 0 ]; do
       install_alias=1
       shift 2
       ;;
-    --no-dev)
-      install_target='.'
+    --with-external)
+      install_label='runtime + external media'
+      install_deps=("yt-dlp>=2025.1.0")
+      shift
+      ;;
+    --dev)
+      install_label='development'
+      install_deps=("yt-dlp>=2025.1.0" "pytest>=8.0")
       shift
       ;;
     -h|--help)
@@ -206,11 +214,18 @@ log "Creating virtual environment: $venv_path"
 venv_python="$venv_path/bin/python"
 venv_snooper="$venv_path/bin/snooper"
 
-log "Upgrading packaging tools"
-"$venv_python" -m pip install --upgrade pip setuptools wheel
+if [ "${#install_deps[@]}" -gt 0 ]; then
+  log "Installing optional dependencies: ${install_deps[*]}"
+  "$venv_python" -m pip install "${install_deps[@]}"
+fi
 
-log "Installing snooper: $install_target"
-"$venv_python" -m pip install --no-build-isolation -e "$install_target"
+log "Installing snooper launcher: $install_label"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'export PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH}\n' "$(shell_quote "$repo_root/src")"
+  printf 'exec %s -m snooper.cli "$@"\n' "$(shell_quote "$venv_python")"
+} > "$venv_snooper"
+chmod +x "$venv_snooper"
 
 log "Checking CLI"
 "$venv_snooper" --help >/dev/null
